@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 模型文件（NPU 模型在 /opt/yolov5/，不随仓库分发）
+*.pt
+*.nb
+*.onnx
+*.weights
+
+# 录屏与图片输出
+*.avi
+*.mp4
+result.png
+*.tmp*
+
+# 文档与个人信息
+*.docx
+*.pdf
+
+# IDE
+.vscode/
+.idea/

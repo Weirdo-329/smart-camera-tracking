@@ -1,0 +1,11 @@
+[Unit]
+Description=Initialize PWM channels for servo gimbal
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/orangepi/Desktop/Graduation_project/setup_pwm.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
