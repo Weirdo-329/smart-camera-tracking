@@ -175,8 +175,11 @@ def main():
                 print("[WARN] 读取帧失败")
                 continue
 
-            # 缩小到处理分辨率做检测/跟踪（720p）
-            proc_frame = cv2.resize(frame, (config.CAMERA_WIDTH, config.CAMERA_HEIGHT))
+            # 缩小到处理分辨率做检测/跟踪（分辨率相同时跳过 resize）
+            if frame.shape[1] != config.CAMERA_WIDTH or frame.shape[0] != config.CAMERA_HEIGHT:
+                proc_frame = cv2.resize(frame, (config.CAMERA_WIDTH, config.CAMERA_HEIGHT))
+            else:
+                proc_frame = frame
             result = tracker.update(proc_frame)
 
             # 发送偏移量给舵机

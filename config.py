@@ -1,10 +1,11 @@
 """全局配置参数"""
 
 # ========== 摄像头参数 ==========
-# 采集分辨率（推流用，PC 端全高清）
-CAMERA_CAPTURE_WIDTH = 1920
-CAMERA_CAPTURE_HEIGHT = 1080
-# 处理分辨率（检测/跟踪/控制用，降低计算量保证实时性）
+# 采集分辨率（与处理分辨率一致时性能最佳；如需推流全高清可改为 1920x1080，
+# 但会因 1080p 解码/编码开销损失约 1/3 帧率）
+CAMERA_CAPTURE_WIDTH = 1280
+CAMERA_CAPTURE_HEIGHT = 720
+# 处理分辨率（检测/跟踪/控制用）
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
 FPS = 30
