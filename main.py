@@ -88,13 +88,14 @@ def main():
     print("=" * 50)
     print("智能摄像头 - 框选锁定跟踪系统")
     print("=" * 50)
-    print(f"分辨率: {config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT} @ {config.FPS}fps")
+    print(f"采集: {config.CAMERA_CAPTURE_WIDTH}x{config.CAMERA_CAPTURE_HEIGHT} @ {config.FPS}fps")
+    print(f"处理: {config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT}（推流保持采集分辨率）")
 
-    # 初始化摄像头
+    # 初始化摄像头（按采集分辨率打开）
     cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_CAPTURE_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_CAPTURE_HEIGHT)
     cap.set(cv2.CAP_PROP_FPS, config.FPS)
 
     if not cap.isOpened():
@@ -164,6 +165,9 @@ def main():
 
     global _latest_frame
 
+    # 推流/采集分辨率与处理分辨率的比例
+    stream_scale = config.CAMERA_CAPTURE_WIDTH / config.CAMERA_WIDTH
+
     try:
         while True:
             ret, frame = cap.read()
@@ -171,8 +175,9 @@ def main():
                 print("[WARN] 读取帧失败")
                 continue
 
-            # 执行跟踪
-            result = tracker.update(frame)
+            # 缩小到处理分辨率做检测/跟踪（720p）
+            proc_frame = cv2.resize(frame, (config.CAMERA_WIDTH, config.CAMERA_HEIGHT))
+            result = tracker.update(proc_frame)
 
             # 发送偏移量给舵机
             if result.has_target:
@@ -187,7 +192,7 @@ def main():
                 fps_timer = time.time()
 
             # 绘制内容层（目标框/箭头/十字，随缩放移动）
-            annotated = frame.copy()
+            annotated = proc_frame.copy()
             annotated = tracker.draw(annotated, result)
 
             # 应用缩放（只作用于画面内容）
@@ -217,7 +222,13 @@ def main():
             # 推流（只推干净画面，缩放跟随本地显示）
             if use_stream:
                 if zoom.zoom_level > 1.0:
+                    # 缩放中心从 720p 处理坐标换算到采集分辨率坐标
+                    saved_center = zoom.zoom_center
+                    if saved_center:
+                        zoom.zoom_center = (int(saved_center[0] * stream_scale),
+                                            int(saved_center[1] * stream_scale))
                     stream_frame = zoom.apply_zoom(frame.copy())
+                    zoom.zoom_center = saved_center
                 else:
                     stream_frame = frame.copy()
                 with _frame_lock:

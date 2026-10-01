@@ -69,8 +69,8 @@ class TrackingResult:
 
 class SmartTracker:
     def __init__(self):
-        # NPU 检测器
-        self.detector = NpuDetector(conf=0.4)
+        # NPU 检测器（YOLOv5，板载 NPU 加速推理）
+        self.detector = NpuDetector(conf=config.DETECT_CONFIDENCE)
 
         # OpenCV 轻量跟踪器
         self._tracker = None
@@ -78,8 +78,7 @@ class SmartTracker:
         self._target_class = ""
         self._tracking = False
 
-        # 检测间隔控制
-        self._detect_interval = 10     # 每 N 帧做一次 YOLO 检测
+        # 检测/跟踪状态
         self._frame_count = 0
         self._last_detections = []
         self._lost_count = 0
@@ -189,8 +188,13 @@ class SmartTracker:
         """执行一帧跟踪，返回 TrackingResult。"""
         self._frame_count += 1
 
-        # 纯手动框选模式：不自动运行 YOLO，检测列表保持空
-        self._last_detections = []
+        # --- 阶段 1：NPU 目标检测（手动模式定期运行，提供可点击的检测框）---
+        if not self._tracking and config.AUTO_DETECT_ENABLE:
+            if self._frame_count % config.DETECT_INTERVAL == 0 or not self._last_detections:
+                self._last_detections = self.detector.detect(frame)
+        else:
+            # 跟踪中不运行检测，节省 NPU 算力
+            self._last_detections = []
 
         # --- 阶段 2：跟踪 ---
         if self._tracking and self._target_bbox is not None:
@@ -258,9 +262,23 @@ class SmartTracker:
 
     def draw(self, frame, result, scale=1.0):
         """
-        内容层：目标框、箭头、中心十字。
+        内容层：检测框、目标框、箭头、中心十字。
         scale: 绘制缩放系数（1080p 推流时 = capture/process 分辨率比）。
         """
+        # 未锁定：绘制 NPU 检测框（带编号，可点击锁定）
+        if not result.has_target:
+            for i, d in enumerate(result.detections):
+                bx = int(d["bbox"][0] * scale)
+                by = int(d["bbox"][1] * scale)
+                bw = int(d["bbox"][2] * scale)
+                bh = int(d["bbox"][3] * scale)
+                cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (0, 255, 0), 2)
+                label = f"[{i+1}] {d['class_name']} {d['conf']:.0%}"
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(frame, (bx, by - th - 6), (bx + tw, by), (0, 255, 0), -1)
+                cv2.putText(frame, label, (bx, by - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
         # 绘制锁定目标
         if result.has_target and result.target_bbox:
             x = int(result.target_bbox[0] * scale)
