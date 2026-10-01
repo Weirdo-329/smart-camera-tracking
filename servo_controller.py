@@ -22,6 +22,10 @@ class PID:
         self.prev_error = 0.0
         self.integral = 0.0
 
+    def decay_integral(self, factor=0.8):
+        """积分缓衰减（死区内用，保留微分记忆不丢阻尼）。"""
+        self.integral *= factor
+
     def update(self, error, dt=1.0):
         """
         计算 PID 输出。
@@ -74,8 +78,8 @@ class ServoController:
         #   kp: 比例 — 误差大转得快
         #   ki: 积分 — 消除稳态误差（目标永远差一点）
         #   kd: 微分 — 阻尼振荡（摇晃就加大它）
-        self.pid_pan = PID(kp=0.004, ki=0.005, kd=0.03, output_limit=1.5)
-        self.pid_tilt = PID(kp=0.005, ki=0.002, kd=0.03, output_limit=1.5)
+        self.pid_pan = PID(kp=0.004, ki=0.005, kd=0.05, output_limit=1.5)
+        self.pid_tilt = PID(kp=0.005, ki=0.002, kd=0.05, output_limit=1.5)
 
         self.period = 20000000        # 20ms = 50Hz（舵机标准频率）
         self.duty_min = 500000        # 0.5ms → 0°
@@ -86,6 +90,9 @@ class ServoController:
         self._smooth_dx = 0.0
         self._smooth_dy = 0.0
         self._smooth_alpha = 0.25     # 0~1，越小越平滑（响应也越慢）
+
+        # 死区迟滞状态（防止目标在死区边界来回振荡）
+        self._in_deadzone = False
 
         self.enabled = True
         self._setup()
@@ -174,12 +181,21 @@ class ServoController:
         self._smooth_dy = self._smooth_alpha * dy + (1 - self._smooth_alpha) * self._smooth_dy
         sx, sy = self._smooth_dx, self._smooth_dy
 
-        # 死区判断（用平滑后的误差）
-        if abs(sx) < config.DEADZONE_X and abs(sy) < config.DEADZONE_Y:
-            # 死区内重置积分，防止出来后突然动作
-            self.pid_pan.reset()
-            self.pid_tilt.reset()
+        # 死区判断（带迟滞：进入死区阈值 DEADZONE，退出需要 1.6 倍，
+        # 防止目标在边界附近来回跨线触发振荡）
+        if self._in_deadzone:
+            exit_th = 1.6
+        else:
+            exit_th = 1.0
+
+        if abs(sx) < config.DEADZONE_X * exit_th and abs(sy) < config.DEADZONE_Y * exit_th:
+            self._in_deadzone = True
+            # 积分缓衰减（不 reset：保留微分记忆，振荡时才能刹车）
+            self.pid_pan.decay_integral(0.8)
+            self.pid_tilt.decay_integral(0.8)
             return
+
+        self._in_deadzone = False
 
         # PID 计算角度增量（负号：目标偏右云台向右转，方向现场可调）
         delta_pan = -self.pid_pan.update(sx)

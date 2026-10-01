@@ -8,11 +8,11 @@
 
 - **手动框选锁定**：触摸屏拖拽画框指定任意跟踪目标（纯手动方案，画面无自动检测框干扰）
 - **KCF 连续跟踪**：锁定后帧间轻量跟踪，640×360 缩小图上运行保证实时性
-- **双轴 PID 控制**：P/I/D 三参数 + 死区 + 积分抗饱和 + 低通滤波平滑
+- **双轴 PID 控制**：P/I/D 三参数 + 死区迟滞 + 积分抗饱和 + 低通滤波平滑
 - **手动/自动双模式**：方向按钮 / WASD / 方向键控制云台；锁定后自动跟踪
-- **采集/处理分离架构**：默认 1280×720 采集（流畅优先）；可将采集改为 1920×1080 实现全高清推流，处理仍保持 720p（以约 1/3 帧率为代价）
+- **采集/处理分离架构**：默认 1280×720 采集（约 15-20 FPS 流畅运行）；可将采集改为 1920×1080 实现全高清推流，处理保持 720p（以约 1/3 帧率为代价）
 - **HTTP MJPEG 局域网推流**：PC 浏览器直接观看，mDNS 域名访问
-- **屏幕交互 UI**：中文按钮（取消跟踪 / 方向 / 缩放 / 退出），PIL 渲染
+- **屏幕交互 UI**：中文按钮（取消跟踪 / 方向 / 缩放 / 退出），PIL 渲染缓存加速
 
 ## 硬件组成
 
@@ -34,12 +34,14 @@
 ## 软件架构
 
 ```
-USB摄像头(1080p) ─┬─→ 缩小720p ─→ KCF跟踪 + PID控制 ─→ PWM ─→ 云台舵机
-                  └─→ 原始1080p ─→ HTTP MJPEG推流 ─→ PC浏览器
+USB摄像头(720p) ──→ 画面处理 ──→ KCF跟踪 + PID控制 ──→ PWM ──→ 云台舵机
+      │              │
+      │              └──→ 标注画面 ──→ 本地触摸屏显示（框/按钮/状态）
+      └──────────────────→ 干净画面 ──→ HTTP MJPEG推流 ──→ PC浏览器
 ```
 
 ```
-main.py                    # 主程序（1080p采集/720p处理/推流/键盘交互）
+main.py                    # 主程序（采集/处理/推流/键盘交互）
 ├── smart_tracker.py       # 框选锁定 + KCF 跟踪 + 屏幕 UI
 ├── servo_controller.py    # PWM 舵机 + 双轴 PID + 低通滤波
 ├── touch_handler.py       # 缩放控制（键盘 + 屏幕按钮）
@@ -68,7 +70,7 @@ sudo cp pwm-init.service /etc/systemd/system/   # 开机自动初始化（可选
 sudo systemctl enable --now pwm-init.service
 ```
 
-### 3. NPU 模型部署
+### 3. NPU 模型（预留，未接入主流程）
 
 板载 NPU 的 YOLOv5 二进制与模型位于 `/opt/yolov5/`（系统镜像自带）：
 
@@ -76,6 +78,10 @@ sudo systemctl enable --now pwm-init.service
 /opt/yolov5/yolov5          # NPU 推理二进制
 /opt/yolov5/model/yolov5.nb # 转换后的模型
 ```
+
+`npu_detector.py` 提供了 NPU 检测的封装（单次推理约 0.24s），当前主流程采用
+纯手动框选方案，未调用 NPU 检测；如需自动目标检测可在 `smart_tracker.py` 的
+`update()` 中按需接入。
 
 ### 4. mDNS（PC 域名访问，可选）
 
@@ -112,13 +118,17 @@ PC 端浏览器打开 `http://orangepi4pro.local:8080`（或双击 `smartcam.bat
 ```python
 # config.py — 死区（像素）、手动步进、初始角度、限幅
 DEADZONE_X = 30
+DEADZONE_Y = 30
 MANUAL_STEP = 3.0
 PAN_INIT_ANGLE = 90
-TILT_INIT_ANGLE = 120
+TILT_INIT_ANGLE = 150
 
 # servo_controller.py — PID（摇晃加大 kd，响应慢加大 kp）
-PID(kp=0.004, ki=0.005, kd=0.03, output_limit=1.5)  # pan
-PID(kp=0.005, ki=0.002, kd=0.03, output_limit=1.5)  # tilt
+PID(kp=0.004, ki=0.005, kd=0.05, output_limit=1.5)  # pan
+PID(kp=0.005, ki=0.002, kd=0.05, output_limit=1.5)  # tilt
+
+# 死区迟滞：误差 <30px 进入死区，>48px 才退出（防边界振荡）
+# 死区内积分缓衰减（保留微分记忆，振荡时才能刹车）
 ```
 
 ## 踩坑记录
@@ -132,7 +142,8 @@ PID(kp=0.005, ki=0.002, kd=0.03, output_limit=1.5)  # tilt
 ## 已知限制
 
 - KCF 目标被长时间遮挡时会漂移，未实现稳健的遮挡检测（曾尝试 YOLO 校验方案，因检测不稳定回退）
-- NPU YOLOv5 为 COCO 预训练模型，对特定仪器（示波器等）识别有限，主要靠手动框选
+- 无自动目标检测：目标需手动框选指定，遮挡后需重新框选
+- 视觉反馈存在 2-4 帧延迟，PID 响应速度受限于处理帧率
 
 ## 项目结构
 
