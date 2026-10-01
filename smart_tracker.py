@@ -24,30 +24,47 @@ def _get_cjk_font(size):
     return _cjk_font_cache[size]
 
 
+# 渲染结果缓存：按键 (text, size, color) 缓存 BGRA 图像，避免每帧重复渲染
+_cjk_render_cache = {}
+
+
+def _render_chinese(text, font_size, text_color):
+    """渲染中文文字为 BGRA 图像（带缓存，裁剪到文字实际大小）。"""
+    key = (text, font_size, text_color)
+    if key not in _cjk_render_cache:
+        font = _get_cjk_font(font_size)
+        # 先测文字尺寸
+        probe = ImageDraw.Draw(Image.new("RGBA", (8, 8), (0, 0, 0, 0)))
+        bbox = probe.textbbox((0, 0), text, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        pad = 3
+        w, h = tw + pad * 2, th + pad * 2
+        img_pil = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img_pil)
+        draw.text((pad - bbox[0], pad - bbox[1]), text, font=font,
+                  fill=text_color + (255,))
+        img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGBA2BGRA)
+        _cjk_render_cache[key] = (img_cv, tw, th)
+    return _cjk_render_cache[key]
+
+
 def _draw_chinese(frame, text, center, font_size, text_color=(255, 255, 255),
                   anchor="center"):
-    """在 OpenCV 帧上绘制中文文字（PIL 渲染）。anchor: center / left。"""
-    font = _get_cjk_font(font_size)
-    # PIL 渲染文字
-    img_pil = Image.new("RGBA", (800, font_size + 10), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img_pil)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((5 - bbox[0], 5 - bbox[1]), text, font=font, fill=text_color + (255,))
-    # 转 OpenCV 格式并贴到帧上
-    img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGBA2BGRA)
+    """在 OpenCV 帧上绘制中文文字（渲染结果缓存，只做贴图混合）。"""
+    img_cv, tw, th = _render_chinese(text, font_size, text_color)
+    ih, iw = img_cv.shape[:2]
     if anchor == "left":
         x1 = int(center[0])
     else:
-        x1 = int(center[0] - tw / 2) - 5
-    y1 = int(center[1] - th / 2) - 5
+        x1 = int(center[0] - tw / 2) - 3
+    y1 = int(center[1] - th / 2) - 3
     x1 = max(0, x1)
     y1 = max(0, y1)
     fh, fw = frame.shape[:2]
     if x1 >= fw or y1 >= fh:
         return
-    x2 = min(fw, x1 + img_cv.shape[1])
-    y2 = min(fh, y1 + img_cv.shape[0])
+    x2 = min(fw, x1 + iw)
+    y2 = min(fh, y1 + ih)
     roi = frame[y1:y2, x1:x2]
     overlay = img_cv[:y2 - y1, :x2 - x1]
     # 按 alpha 混合

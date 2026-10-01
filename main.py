@@ -194,8 +194,21 @@ def main():
                 frame_count = 0
                 fps_timer = time.time()
 
-            # 绘制内容层（目标框/箭头/十字，随缩放移动）
-            annotated = proc_frame.copy()
+            # 推流先拷贝干净帧（之后画面会被画上标注）
+            if use_stream:
+                if zoom.zoom_level > 1.0:
+                    # 缩放中心从 720p 处理坐标换算到采集分辨率坐标
+                    saved_center = zoom.zoom_center
+                    if saved_center:
+                        zoom.zoom_center = (int(saved_center[0] * stream_scale),
+                                            int(saved_center[1] * stream_scale))
+                    stream_frame = zoom.apply_zoom(frame.copy())
+                    zoom.zoom_center = saved_center
+                else:
+                    stream_frame = frame.copy()
+
+            # 直接在帧上绘制（省一次全图拷贝）
+            annotated = proc_frame
             annotated = tracker.draw(annotated, result)
 
             # 应用缩放（只作用于画面内容）
@@ -222,18 +235,8 @@ def main():
                     (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
                 )
 
-            # 推流（只推干净画面，缩放跟随本地显示）
+            # 推流（干净帧已在绘制前拷贝）
             if use_stream:
-                if zoom.zoom_level > 1.0:
-                    # 缩放中心从 720p 处理坐标换算到采集分辨率坐标
-                    saved_center = zoom.zoom_center
-                    if saved_center:
-                        zoom.zoom_center = (int(saved_center[0] * stream_scale),
-                                            int(saved_center[1] * stream_scale))
-                    stream_frame = zoom.apply_zoom(frame.copy())
-                    zoom.zoom_center = saved_center
-                else:
-                    stream_frame = frame.copy()
                 with _frame_lock:
                     _latest_frame = stream_frame
 
